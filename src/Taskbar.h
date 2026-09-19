@@ -4,7 +4,17 @@
 
 namespace Taskbar
 {
-    bool getBounds(RECT& bounds);
-    bool getWorkArea(RECT& workArea);
-    POINT getMeterPosition(int width, int height, int margin);
+    HWND getWindow();
+
+    bool getBounds(
+        HWND taskbar,
+        RECT& bounds
+    );
+
+    POINT getMeterPosition(
+        HWND taskbar,
+        int width,
+        int height,
+        int margin
+    );
 }

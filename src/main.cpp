@@ -1,36 +1,16 @@
 #include "Network.h"
 #include "MeterWindow.h"
+#include "Taskbar.h"
 
 #include <windows.h>
 
 namespace
 {
     constexpr UINT_PTR SpeedTimerId = 1;
-    constexpr UINT_PTR RepositionTimerId = 2;
+    constexpr UINT_PTR TaskbarTimerId = 2;
 
     constexpr UINT SpeedInterval = 1000;
-    constexpr UINT RepositionInterval = 2000;
-
-    void showError(const wchar_t* message)
-    {
-        const DWORD error = GetLastError();
-
-        wchar_t buffer[256]{};
-
-        wsprintfW(
-            buffer,
-            L"%ls\n\nWindows Error: %lu",
-            message,
-            error
-        );
-
-        MessageBoxW(
-            nullptr,
-            buffer,
-            L"InternetSpeed Error",
-            MB_OK | MB_ICONERROR
-        );
-    }
+    constexpr UINT TaskbarInterval = 2000;
 }
 
 int WINAPI wWinMain(
@@ -40,14 +20,16 @@ int WINAPI wWinMain(
     int
 )
 {
+    HWND taskbar = Taskbar::getWindow();
+
+    if (!taskbar)
+        return 1;
+
     NetworkMonitor network;
     MeterWindow meter;
 
-    if (!meter.create(instance))
-    {
-        showError(L"MeterWindow::create() gagal.");
+    if (!meter.create(instance, taskbar))
         return 1;
-    }
 
     meter.show();
 
@@ -66,21 +48,20 @@ int WINAPI wWinMain(
             SpeedInterval,
             nullptr))
     {
-        showError(L"Speed timer gagal dibuat.");
         return 1;
     }
 
     if (!SetTimer(
             meter.handle(),
-            RepositionTimerId,
-            RepositionInterval,
+            TaskbarTimerId,
+            TaskbarInterval,
             nullptr))
     {
-        showError(L"Reposition timer gagal dibuat.");
         KillTimer(
             meter.handle(),
             SpeedTimerId
         );
+
         return 1;
     }
 
@@ -95,22 +76,24 @@ int WINAPI wWinMain(
         if (message.message == WM_TIMER &&
             message.hwnd == meter.handle())
         {
-            if (message.wParam == SpeedTimerId)
+            switch (message.wParam)
             {
+            case SpeedTimerId:
                 if (network.update())
                 {
-                    const NetworkSpeed currentSpeed =
+                    const NetworkSpeed current =
                         network.getSpeed();
 
                     meter.update(
-                        currentSpeed.downloadMbps,
-                        currentSpeed.uploadMbps
+                        current.downloadMbps,
+                        current.uploadMbps
                     );
                 }
-            }
-            else if (message.wParam == RepositionTimerId)
-            {
+                break;
+
+            case TaskbarTimerId:
                 meter.reposition();
+                break;
             }
 
             continue;
@@ -127,7 +110,7 @@ int WINAPI wWinMain(
 
     KillTimer(
         meter.handle(),
-        RepositionTimerId
+        TaskbarTimerId
     );
 
     return static_cast<int>(message.wParam);

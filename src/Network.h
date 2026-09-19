@@ -17,10 +17,12 @@ public:
     NetworkSpeed getSpeed() const;
 
 private:
+    bool findInterface();
+
+    std::uint32_t interfaceIndex_;
     std::uint64_t previousReceivedBytes_;
     std::uint64_t previousSentBytes_;
     std::uint64_t previousTimestampMs_;
-    std::uint64_t interfaceLuid_;
 
     NetworkSpeed currentSpeed_;
 

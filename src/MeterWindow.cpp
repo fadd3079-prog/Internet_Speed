@@ -8,12 +8,9 @@
 namespace
 {
     constexpr wchar_t WindowClassName[] = L"InternetSpeedMeterWindow";
-    constexpr wchar_t WindowTitle[] = L"Internet Speed";
-
     constexpr int WindowWidth = 180;
     constexpr int WindowHeight = 24;
     constexpr int TaskbarMargin = 4;
-
     constexpr UINT_PTR ExitCommand = 1;
 
     std::wstring formatSpeed(double mbps)
@@ -28,11 +25,12 @@ namespace
         if (mbps < 1000.0)
         {
             wchar_t buffer[32]{};
-            swprintf_s(
-                buffer,
-                mbps < 100.0 ? L"%.1f Mbps" : L"%.0f Mbps",
-                mbps
-            );
+
+            if (mbps < 100.0)
+                swprintf_s(buffer, L"%.1f Mbps", mbps);
+            else
+                swprintf_s(buffer, L"%.0f Mbps", mbps);
+
             return buffer;
         }
 
@@ -41,27 +39,27 @@ namespace
         return buffer;
     }
 
-    void registerWindowClass(HINSTANCE instance)
+    bool registerWindowClass(HINSTANCE instance)
     {
-        static bool registered = false;
-
-        if (registered)
-            return;
-
         WNDCLASSEXW wc{};
         wc.cbSize = sizeof(wc);
         wc.hInstance = instance;
         wc.lpfnWndProc = MeterWindow::WindowProc;
         wc.lpszClassName = WindowClassName;
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = nullptr;
+        wc.style = CS_HREDRAW | CS_VREDRAW;
 
-        RegisterClassExW(&wc);
-        registered = true;
+        if (RegisterClassExW(&wc))
+            return true;
+
+        return GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
     }
 }
 
 MeterWindow::MeterWindow()
     : window_(nullptr),
+      taskbar_(nullptr),
       instance_(nullptr),
       font_(nullptr),
       text_{},
@@ -74,33 +72,48 @@ MeterWindow::MeterWindow()
 MeterWindow::~MeterWindow()
 {
     if (font_)
+    {
         DeleteObject(font_);
+        font_ = nullptr;
+    }
 
     if (window_)
+    {
         DestroyWindow(window_);
+        window_ = nullptr;
+    }
 }
 
-bool MeterWindow::create(HINSTANCE instance)
+bool MeterWindow::create(
+    HINSTANCE instance,
+    HWND taskbar
+)
 {
     if (window_)
         return true;
 
-    instance_ = instance;
+    if (!instance || !taskbar)
+        return false;
 
-    registerWindowClass(instance_);
+    instance_ = instance;
+    taskbar_ = taskbar;
+
+    if (!registerWindowClass(instance_))
+        return false;
 
     window_ = CreateWindowExW(
-        WS_EX_TOOLWINDOW |
         WS_EX_NOACTIVATE |
-        WS_EX_TOPMOST,
+        WS_EX_TOOLWINDOW,
         WindowClassName,
-        WindowTitle,
-        WS_POPUP,
+        L"",
+        WS_CHILD |
+        WS_VISIBLE |
+        WS_CLIPSIBLINGS,
         0,
         0,
         width_,
         height_,
-        nullptr,
+        taskbar_,
         nullptr,
         instance_,
         this
@@ -112,7 +125,11 @@ bool MeterWindow::create(HINSTANCE instance)
     const HDC hdc = GetDC(window_);
 
     if (!hdc)
+    {
+        DestroyWindow(window_);
+        window_ = nullptr;
         return false;
+    }
 
     const int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
 
@@ -152,11 +169,14 @@ void MeterWindow::show()
     if (!window_)
         return;
 
-    ShowWindow(window_, SW_SHOWNOACTIVATE);
+    ShowWindow(
+        window_,
+        SW_SHOWNOACTIVATE
+    );
 
     SetWindowPos(
         window_,
-        HWND_TOPMOST,
+        HWND_TOP,
         0,
         0,
         0,
@@ -166,8 +186,6 @@ void MeterWindow::show()
         SWP_NOACTIVATE |
         SWP_SHOWWINDOW
     );
-
-    UpdateWindow(window_);
 }
 
 void MeterWindow::update(
@@ -178,8 +196,11 @@ void MeterWindow::update(
     if (!window_)
         return;
 
-    const std::wstring download = formatSpeed(downloadMbps);
-    const std::wstring upload = formatSpeed(uploadMbps);
+    const std::wstring download =
+        formatSpeed(downloadMbps);
+
+    const std::wstring upload =
+        formatSpeed(uploadMbps);
 
     swprintf_s(
         text_,
@@ -188,7 +209,29 @@ void MeterWindow::update(
         upload.c_str()
     );
 
-    InvalidateRect(window_, nullptr, FALSE);
+    RECT rect{};
+    GetClientRect(window_, &rect);
+
+    MapWindowPoints(
+        window_,
+        taskbar_,
+        reinterpret_cast<POINT*>(&rect),
+        2
+    );
+
+    InvalidateRect(
+        taskbar_,
+        &rect,
+        TRUE
+    );
+
+    InvalidateRect(
+        window_,
+        nullptr,
+        FALSE
+    );
+
+    UpdateWindow(window_);
 }
 
 void MeterWindow::reposition()
@@ -196,8 +239,23 @@ void MeterWindow::reposition()
     if (!window_)
         return;
 
+    if (!taskbar_ ||
+        !IsWindow(taskbar_))
+    {
+        taskbar_ = Taskbar::getWindow();
+
+        if (!taskbar_)
+            return;
+
+        SetParent(
+            window_,
+            taskbar_
+        );
+    }
+
     const POINT position =
         Taskbar::getMeterPosition(
+            taskbar_,
             width_,
             height_,
             TaskbarMargin
@@ -205,7 +263,7 @@ void MeterWindow::reposition()
 
     SetWindowPos(
         window_,
-        HWND_TOPMOST,
+        HWND_TOP,
         position.x,
         position.y,
         width_,
@@ -232,7 +290,9 @@ LRESULT CALLBACK MeterWindow::WindowProc(
     if (message == WM_NCCREATE)
     {
         const auto* createStruct =
-            reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            reinterpret_cast<const CREATESTRUCTW*>(
+                lParam
+            );
 
         meter =
             static_cast<MeterWindow*>(
@@ -249,7 +309,10 @@ LRESULT CALLBACK MeterWindow::WindowProc(
     {
         meter =
             reinterpret_cast<MeterWindow*>(
-                GetWindowLongPtrW(hwnd, GWLP_USERDATA)
+                GetWindowLongPtrW(
+                    hwnd,
+                    GWLP_USERDATA
+                )
             );
     }
 
@@ -280,9 +343,6 @@ LRESULT MeterWindow::processMessage(
 {
     switch (message)
     {
-    case WM_NCCREATE:
-        return TRUE;
-
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
 
@@ -292,11 +352,18 @@ LRESULT MeterWindow::processMessage(
     case WM_PAINT:
     {
         PAINTSTRUCT ps{};
-        const HDC hdc = BeginPaint(hwnd, &ps);
+        const HDC hdc = BeginPaint(
+            hwnd,
+            &ps
+        );
 
         paint(hdc);
 
-        EndPaint(hwnd, &ps);
+        EndPaint(
+            hwnd,
+            &ps
+        );
+
         return 0;
     }
 
@@ -304,7 +371,6 @@ LRESULT MeterWindow::processMessage(
     {
         POINT position{};
         GetCursorPos(&position);
-
         showContextMenu(position);
         return 0;
     }
@@ -316,8 +382,11 @@ LRESULT MeterWindow::processMessage(
             GET_Y_LPARAM(lParam)
         };
 
-        if (position.x == -1 && position.y == -1)
+        if (position.x == -1 &&
+            position.y == -1)
+        {
             GetCursorPos(&position);
+        }
 
         showContextMenu(position);
         return 0;
@@ -332,7 +401,11 @@ LRESULT MeterWindow::processMessage(
         break;
 
     case WM_NCDESTROY:
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        SetWindowLongPtrW(
+            hwnd,
+            GWLP_USERDATA,
+            0
+        );
         return 0;
 
     case WM_DESTROY:
@@ -350,17 +423,34 @@ LRESULT MeterWindow::processMessage(
 
 void MeterWindow::paint(HDC hdc)
 {
-    SetBkMode(hdc, TRANSPARENT);
-
     RECT rect{};
-    GetClientRect(window_, &rect);
+    GetClientRect(
+        window_,
+        &rect
+    );
 
-    SelectObject(hdc, font_);
+    SetBkMode(
+        hdc,
+        TRANSPARENT
+    );
+
+    SelectObject(
+        hdc,
+        font_
+    );
 
     RECT shadowRect = rect;
-    OffsetRect(&shadowRect, 1, 1);
 
-    SetTextColor(hdc, RGB(0, 0, 0));
+    OffsetRect(
+        &shadowRect,
+        1,
+        1
+    );
+
+    SetTextColor(
+        hdc,
+        RGB(0, 0, 0)
+    );
 
     DrawTextW(
         hdc,
@@ -373,7 +463,10 @@ void MeterWindow::paint(HDC hdc)
         DT_NOPREFIX
     );
 
-    SetTextColor(hdc, RGB(255, 255, 255));
+    SetTextColor(
+        hdc,
+        RGB(255, 255, 255)
+    );
 
     DrawTextW(
         hdc,
@@ -387,7 +480,9 @@ void MeterWindow::paint(HDC hdc)
     );
 }
 
-void MeterWindow::showContextMenu(POINT position)
+void MeterWindow::showContextMenu(
+    POINT position
+)
 {
     HMENU menu = CreatePopupMenu();
 

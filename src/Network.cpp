@@ -1,126 +1,158 @@
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0A00
 
-#include <winsock2.h>
 #include <windows.h>
-#include <ws2ipdef.h>
 #include <iphlpapi.h>
 
 #include "Network.h"
 
 namespace
 {
-    constexpr ULONG DestinationAddress = 0x01010101;
+    constexpr DWORD InternetAddress = 0x01010101;
 
-    bool getActiveInterface(MIB_IF_ROW2& row)
+    bool getActiveInterface(MIB_IFROW& row)
     {
         DWORD interfaceIndex = 0;
 
         if (GetBestInterface(
-                DestinationAddress,
+                InternetAddress,
                 &interfaceIndex) != NO_ERROR)
         {
             return false;
         }
 
-        MIB_IF_ROW2 candidate{};
-        candidate.InterfaceIndex = interfaceIndex;
+        MIB_IFROW candidate{};
+        candidate.dwIndex = interfaceIndex;
 
-        if (GetIfEntry2(&candidate) != NO_ERROR)
+        if (GetIfEntry(&candidate) != NO_ERROR)
             return false;
 
-        if (candidate.OperStatus != IfOperStatusUp)
+        if (candidate.dwOperStatus != MIB_IF_OPER_STATUS_OPERATIONAL)
             return false;
 
-        if (candidate.Type == IF_TYPE_SOFTWARE_LOOPBACK)
+        if (candidate.dwType == IF_TYPE_SOFTWARE_LOOPBACK)
             return false;
 
         row = candidate;
         return true;
     }
+
+    std::uint64_t calculateDelta(
+        std::uint32_t current,
+        std::uint32_t previous)
+    {
+        if (current >= previous)
+            return current - previous;
+
+        return (
+            static_cast<std::uint64_t>(
+                UINT32_MAX
+            ) -
+            previous +
+            current +
+            1
+        );
+    }
 }
 
 NetworkMonitor::NetworkMonitor()
-    : previousReceivedBytes_(0),
+    : interfaceIndex_(0),
+      previousReceivedBytes_(0),
       previousSentBytes_(0),
       previousTimestampMs_(0),
-      interfaceLuid_(0),
       currentSpeed_{0.0, 0.0},
       initialized_(false)
 {
 }
 
-bool NetworkMonitor::update()
+bool NetworkMonitor::findInterface()
 {
-    MIB_IF_ROW2 interfaceRow{};
+    MIB_IFROW row{};
 
-    if (!getActiveInterface(interfaceRow))
+    if (!getActiveInterface(row))
         return false;
 
-    const std::uint64_t currentInterfaceLuid =
-        interfaceRow.InterfaceLuid.Value;
+    interfaceIndex_ = row.dwIndex;
 
-    const std::uint64_t receivedBytes =
-        interfaceRow.InOctets;
+    return true;
+}
 
-    const std::uint64_t sentBytes =
-        interfaceRow.OutOctets;
+bool NetworkMonitor::update()
+{
+    MIB_IFROW row{};
 
-    const std::uint64_t timestampMs =
+    if (!getActiveInterface(row))
+    {
+        currentSpeed_ = {0.0, 0.0};
+        initialized_ = false;
+        interfaceIndex_ = 0;
+        return false;
+    }
+
+    const std::uint64_t currentTimestampMs =
         GetTickCount64();
 
+    const std::uint32_t currentInterfaceIndex =
+        row.dwIndex;
+
+    const std::uint32_t currentReceivedBytes =
+        row.dwInOctets;
+
+    const std::uint32_t currentSentBytes =
+        row.dwOutOctets;
+
     if (!initialized_ ||
-        interfaceLuid_ != currentInterfaceLuid)
+        interfaceIndex_ != currentInterfaceIndex)
     {
-        previousReceivedBytes_ = receivedBytes;
-        previousSentBytes_ = sentBytes;
-        previousTimestampMs_ = timestampMs;
-        interfaceLuid_ = currentInterfaceLuid;
+        interfaceIndex_ = currentInterfaceIndex;
+        previousReceivedBytes_ = currentReceivedBytes;
+        previousSentBytes_ = currentSentBytes;
+        previousTimestampMs_ = currentTimestampMs;
         currentSpeed_ = {0.0, 0.0};
         initialized_ = true;
         return true;
     }
 
     const std::uint64_t elapsedMs =
-        timestampMs - previousTimestampMs_;
+        currentTimestampMs - previousTimestampMs_;
 
     if (elapsedMs == 0)
         return false;
 
-    if (receivedBytes < previousReceivedBytes_ ||
-        sentBytes < previousSentBytes_)
-    {
-        previousReceivedBytes_ = receivedBytes;
-        previousSentBytes_ = sentBytes;
-        previousTimestampMs_ = timestampMs;
-        currentSpeed_ = {0.0, 0.0};
-        return true;
-    }
-
     const std::uint64_t receivedDelta =
-        receivedBytes - previousReceivedBytes_;
+        calculateDelta(
+            currentReceivedBytes,
+            static_cast<std::uint32_t>(
+                previousReceivedBytes_
+            )
+        );
 
     const std::uint64_t sentDelta =
-        sentBytes - previousSentBytes_;
+        calculateDelta(
+            currentSentBytes,
+            static_cast<std::uint32_t>(
+                previousSentBytes_
+            )
+        );
 
-    const double seconds =
+    const double elapsedSeconds =
         static_cast<double>(elapsedMs) / 1000.0;
 
     currentSpeed_.downloadMbps =
         static_cast<double>(receivedDelta) *
         8.0 /
-        seconds /
+        elapsedSeconds /
         1'000'000.0;
 
     currentSpeed_.uploadMbps =
         static_cast<double>(sentDelta) *
         8.0 /
-        seconds /
+        elapsedSeconds /
         1'000'000.0;
 
-    previousReceivedBytes_ = receivedBytes;
-    previousSentBytes_ = sentBytes;
-    previousTimestampMs_ = timestampMs;
+    previousReceivedBytes_ = currentReceivedBytes;
+    previousSentBytes_ = currentSentBytes;
+    previousTimestampMs_ = currentTimestampMs;
 
     return true;
 }
