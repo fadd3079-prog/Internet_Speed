@@ -1,5 +1,7 @@
 #include <windows.h>
 
+IDI_APP ICON "../app.ico"
+
 101 RCDATA "../SpaceMono-Regular.ttf"
 
 VS_VERSION_INFO VERSIONINFO
