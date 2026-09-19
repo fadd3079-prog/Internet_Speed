@@ -11,6 +11,8 @@ namespace
     constexpr int WindowWidth = 190;
     constexpr int WindowHeight = 24;
     constexpr int TaskbarMargin = 14;
+    constexpr int PaddingX = 8;
+    constexpr int PaddingY = 4;
 
     constexpr UINT ExitCommand = 1;
     constexpr WORD FontResourceId = 101;
@@ -136,8 +138,8 @@ bool MeterWindow::create(
         WS_POPUP,
         0,
         0,
-        width_,
-        height_,
+        width_ + PaddingX * 2,
+        height_ + PaddingY * 2,
         nullptr,
         nullptr,
         instance_,
@@ -151,13 +153,6 @@ bool MeterWindow::create(
         window_,
         GWLP_HWNDPARENT,
         reinterpret_cast<LONG_PTR>(taskbar_)
-    );
-
-    SetLayeredWindowAttributes(
-        window_,
-        TransparentColor,
-        0,
-        LWA_COLORKEY
     );
 
     if (!loadFont())
@@ -374,10 +369,10 @@ void MeterWindow::reposition()
     SetWindowPos(
         window_,
         HWND_TOPMOST,
-        screenPosition.x,
-        screenPosition.y,
-        width_,
-        height_,
+        screenPosition.x - PaddingX,
+        screenPosition.y - PaddingY,
+        width_ + PaddingX * 2,
+        height_ + PaddingY * 2,
         SWP_NOACTIVATE |
         SWP_SHOWWINDOW
     );
@@ -543,53 +538,94 @@ LRESULT MeterWindow::processMessage(
     );
 }
 
-void MeterWindow::paint(HDC hdc)
+void MeterWindow::paint(HDC)
 {
-    RECT rect{};
+    const int paddedWidth = width_ + PaddingX * 2;
+    const int paddedHeight = height_ + PaddingY * 2;
 
-    GetClientRect(
-        window_,
-        &rect
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = paddedWidth;
+    bmi.bmiHeader.biHeight = -paddedHeight;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    const HDC screenDC = GetDC(nullptr);
+    const HDC memDC = CreateCompatibleDC(screenDC);
+    const HBITMAP bitmap = CreateDIBSection(
+        screenDC, &bmi, DIB_RGB_COLORS,
+        &bits, nullptr, 0);
+    const HBITMAP oldBitmap =
+        static_cast<HBITMAP>(
+            SelectObject(memDC, bitmap));
+
+    ZeroMemory(
+        bits,
+        paddedWidth * paddedHeight * 4
     );
 
-    HBRUSH background =
-        CreateSolidBrush(
-            TransparentColor
-        );
+    SetBkMode(memDC, TRANSPARENT);
+    SelectObject(memDC, font_);
+    SetTextColor(memDC, RGB(255, 255, 255));
 
-    FillRect(
-        hdc,
-        &rect,
-        background
-    );
-
-    DeleteObject(background);
-
-    SetBkMode(
-        hdc,
-        TRANSPARENT
-    );
-
-    SelectObject(
-        hdc,
-        font_
-    );
-
-    SetTextColor(
-        hdc,
-        RGB(255, 255, 255)
-    );
+    RECT textRect{
+        PaddingX,
+        PaddingY,
+        paddedWidth - PaddingX,
+        paddedHeight - PaddingY
+    };
 
     DrawTextW(
-        hdc,
+        memDC,
         text_,
         -1,
-        &rect,
+        &textRect,
         DT_LEFT |
         DT_VCENTER |
         DT_SINGLELINE |
         DT_NOPREFIX
     );
+
+    auto* pixels =
+        static_cast<DWORD*>(bits);
+
+    for (int i = 0;
+         i < paddedWidth * paddedHeight;
+         ++i)
+    {
+        if (pixels[i] & 0x00FFFFFF)
+            pixels[i] =
+                0xFF000000 |
+                (pixels[i] & 0x00FFFFFF);
+        else
+            pixels[i] = 0x01000000;
+    }
+
+    POINT sourcePos{0, 0};
+    SIZE windowSize{paddedWidth, paddedHeight};
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    UpdateLayeredWindow(
+        window_,
+        screenDC,
+        nullptr,
+        &windowSize,
+        memDC,
+        &sourcePos,
+        0,
+        &blend,
+        ULW_ALPHA
+    );
+
+    SelectObject(memDC, oldBitmap);
+    DeleteObject(bitmap);
+    DeleteDC(memDC);
+    ReleaseDC(nullptr, screenDC);
 }
 
 void MeterWindow::showContextMenu(

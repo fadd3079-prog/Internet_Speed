@@ -10,16 +10,31 @@ permissions:
 
 jobs:
   build-release:
-    runs-on: windows-2025-vs2026
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+
+      - name: Validate tag matches version
+        shell: pwsh
+        run: |
+          $cmakeContent = Get-Content CMakeLists.txt -Raw
+          if ($cmakeContent -match 'VERSION\s+(\d+\.\d+\.\d+)') {
+            $cmakeVersion = $Matches[1]
+            $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($cmakeVersion -ne $tagVersion) {
+              throw "Version mismatch: CMake=$cmakeVersion, Tag=$env:GITHUB_REF_NAME"
+            }
+            Write-Host "Version validated: $env:GITHUB_REF_NAME matches CMake $cmakeVersion"
+          } else {
+            throw "Could not extract version from CMakeLists.txt"
+          }
 
       - name: Configure
         shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build
         shell: pwsh
