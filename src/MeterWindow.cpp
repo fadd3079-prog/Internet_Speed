@@ -8,17 +8,26 @@
 namespace
 {
     constexpr wchar_t WindowClassName[] = L"InternetSpeedMeterWindow";
-    constexpr int WindowWidth = 180;
+    constexpr int WindowWidth = 190;
     constexpr int WindowHeight = 24;
-    constexpr int TaskbarMargin = 4;
-    constexpr UINT_PTR ExitCommand = 1;
+    constexpr int TaskbarMargin = 14;
+
+    constexpr UINT ExitCommand = 1;
+    constexpr WORD FontResourceId = 101;
+    constexpr COLORREF TransparentColor = RGB(0, 0, 0);
 
     std::wstring formatSpeed(double mbps)
     {
         if (mbps < 1.0)
         {
             wchar_t buffer[32]{};
-            swprintf_s(buffer, L"%.0f Kbps", mbps * 1000.0);
+
+            swprintf_s(
+                buffer,
+                L"%.0f Kbps",
+                mbps * 1000.0
+            );
+
             return buffer;
         }
 
@@ -26,16 +35,23 @@ namespace
         {
             wchar_t buffer[32]{};
 
-            if (mbps < 100.0)
-                swprintf_s(buffer, L"%.1f Mbps", mbps);
-            else
-                swprintf_s(buffer, L"%.0f Mbps", mbps);
+            swprintf_s(
+                buffer,
+                mbps < 100.0 ? L"%.1f Mbps" : L"%.0f Mbps",
+                mbps
+            );
 
             return buffer;
         }
 
         wchar_t buffer[32]{};
-        swprintf_s(buffer, L"%.2f Gbps", mbps / 1000.0);
+
+        swprintf_s(
+            buffer,
+            L"%.2f Gbps",
+            mbps / 1000.0
+        );
+
         return buffer;
     }
 
@@ -43,12 +59,11 @@ namespace
     {
         WNDCLASSEXW wc{};
         wc.cbSize = sizeof(wc);
-        wc.hInstance = instance;
-        wc.lpfnWndProc = MeterWindow::WindowProc;
-        wc.lpszClassName = WindowClassName;
-        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        wc.hbrBackground = nullptr;
         wc.style = CS_HREDRAW | CS_VREDRAW;
+        wc.lpfnWndProc = MeterWindow::WindowProc;
+        wc.hInstance = instance;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = WindowClassName;
 
         if (RegisterClassExW(&wc))
             return true;
@@ -62,25 +77,35 @@ MeterWindow::MeterWindow()
       taskbar_(nullptr),
       instance_(nullptr),
       font_(nullptr),
+      fontResource_(nullptr),
       text_{},
       width_(WindowWidth),
       height_(WindowHeight)
 {
-    wcscpy_s(text_, L"↓ 0 Mbps   ↑ 0 Mbps");
+    swprintf_s(
+        text_,
+        L"\x2193 0 Mbps   \x2191 0 Mbps"
+    );
 }
 
 MeterWindow::~MeterWindow()
 {
+    if (window_)
+    {
+        DestroyWindow(window_);
+        window_ = nullptr;
+    }
+
     if (font_)
     {
         DeleteObject(font_);
         font_ = nullptr;
     }
 
-    if (window_)
+    if (fontResource_)
     {
-        DestroyWindow(window_);
-        window_ = nullptr;
+        RemoveFontMemResourceEx(fontResource_);
+        fontResource_ = nullptr;
     }
 }
 
@@ -102,18 +127,18 @@ bool MeterWindow::create(
         return false;
 
     window_ = CreateWindowExW(
+        WS_EX_TOOLWINDOW |
         WS_EX_NOACTIVATE |
-        WS_EX_TOOLWINDOW,
+        WS_EX_TOPMOST |
+        WS_EX_LAYERED,
         WindowClassName,
         L"",
-        WS_CHILD |
-        WS_VISIBLE |
-        WS_CLIPSIBLINGS,
+        WS_POPUP,
         0,
         0,
         width_,
         height_,
-        taskbar_,
+        nullptr,
         nullptr,
         instance_,
         this
@@ -122,37 +147,20 @@ bool MeterWindow::create(
     if (!window_)
         return false;
 
-    const HDC hdc = GetDC(window_);
-
-    if (!hdc)
-    {
-        DestroyWindow(window_);
-        window_ = nullptr;
-        return false;
-    }
-
-    const int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
-
-    ReleaseDC(window_, hdc);
-
-    font_ = CreateFontW(
-        -MulDiv(9, dpi, 72),
-        0,
-        0,
-        0,
-        FW_SEMIBOLD,
-        FALSE,
-        FALSE,
-        FALSE,
-        DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS,
-        L"Segoe UI"
+    SetWindowLongPtrW(
+        window_,
+        GWLP_HWNDPARENT,
+        reinterpret_cast<LONG_PTR>(taskbar_)
     );
 
-    if (!font_)
+    SetLayeredWindowAttributes(
+        window_,
+        TransparentColor,
+        0,
+        LWA_COLORKEY
+    );
+
+    if (!loadFont())
     {
         DestroyWindow(window_);
         window_ = nullptr;
@@ -160,6 +168,107 @@ bool MeterWindow::create(
     }
 
     reposition();
+
+    return true;
+}
+
+bool MeterWindow::loadFont()
+{
+    HRSRC resource =
+        FindResourceW(
+            instance_,
+            MAKEINTRESOURCEW(FontResourceId),
+            RT_RCDATA
+        );
+
+    if (!resource)
+        return false;
+
+    HGLOBAL loaded =
+        LoadResource(
+            instance_,
+            resource
+        );
+
+    if (!loaded)
+        return false;
+
+    void* data =
+        LockResource(loaded);
+
+    if (!data)
+        return false;
+
+    const DWORD size =
+        SizeofResource(
+            instance_,
+            resource
+        );
+
+    if (size == 0)
+        return false;
+
+    DWORD fontCount = 0;
+
+    fontResource_ =
+        AddFontMemResourceEx(
+            data,
+            size,
+            nullptr,
+            &fontCount
+        );
+
+    if (!fontResource_ || fontCount == 0)
+    {
+        fontResource_ = nullptr;
+        return false;
+    }
+
+    const HDC hdc =
+        GetDC(window_);
+
+    if (!hdc)
+    {
+        RemoveFontMemResourceEx(fontResource_);
+        fontResource_ = nullptr;
+        return false;
+    }
+
+    const int dpi =
+        GetDeviceCaps(
+            hdc,
+            LOGPIXELSY
+        );
+
+    ReleaseDC(
+        window_,
+        hdc
+    );
+
+    font_ =
+        CreateFontW(
+            -MulDiv(10, dpi, 72),
+            0,
+            0,
+            0,
+            FW_NORMAL,
+            FALSE,
+            FALSE,
+            FALSE,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            ANTIALIASED_QUALITY,
+            FIXED_PITCH | FF_MODERN,
+            L"Space Mono"
+        );
+
+    if (!font_)
+    {
+        RemoveFontMemResourceEx(fontResource_);
+        fontResource_ = nullptr;
+        return false;
+    }
 
     return true;
 }
@@ -176,7 +285,7 @@ void MeterWindow::show()
 
     SetWindowPos(
         window_,
-        HWND_TOP,
+        HWND_TOPMOST,
         0,
         0,
         0,
@@ -186,6 +295,8 @@ void MeterWindow::show()
         SWP_NOACTIVATE |
         SWP_SHOWWINDOW
     );
+
+    UpdateWindow(window_);
 }
 
 void MeterWindow::update(
@@ -204,25 +315,9 @@ void MeterWindow::update(
 
     swprintf_s(
         text_,
-        L"↓ %ls   ↑ %ls",
+        L"\x2193 %ls   \x2191 %ls",
         download.c_str(),
         upload.c_str()
-    );
-
-    RECT rect{};
-    GetClientRect(window_, &rect);
-
-    MapWindowPoints(
-        window_,
-        taskbar_,
-        reinterpret_cast<POINT*>(&rect),
-        2
-    );
-
-    InvalidateRect(
-        taskbar_,
-        &rect,
-        TRUE
     );
 
     InvalidateRect(
@@ -239,33 +334,48 @@ void MeterWindow::reposition()
     if (!window_)
         return;
 
-    if (!taskbar_ ||
-        !IsWindow(taskbar_))
+    HWND currentTaskbar =
+        Taskbar::findTaskbar();
+
+    if (!currentTaskbar)
+        return;
+
+    if (currentTaskbar != taskbar_)
     {
-        taskbar_ = Taskbar::getWindow();
+        taskbar_ = currentTaskbar;
 
-        if (!taskbar_)
-            return;
-
-        SetParent(
+        SetWindowLongPtrW(
             window_,
-            taskbar_
+            GWLP_HWNDPARENT,
+            reinterpret_cast<LONG_PTR>(taskbar_)
         );
     }
 
-    const POINT position =
+    const HWND tray =
+        Taskbar::findTray(taskbar_);
+
+    const POINT clientPosition =
         Taskbar::getMeterPosition(
             taskbar_,
+            tray,
             width_,
             height_,
             TaskbarMargin
         );
 
+    POINT screenPosition =
+        clientPosition;
+
+    ClientToScreen(
+        taskbar_,
+        &screenPosition
+    );
+
     SetWindowPos(
         window_,
-        HWND_TOP,
-        position.x,
-        position.y,
+        HWND_TOPMOST,
+        screenPosition.x,
+        screenPosition.y,
         width_,
         height_,
         SWP_NOACTIVATE |
@@ -352,10 +462,12 @@ LRESULT MeterWindow::processMessage(
     case WM_PAINT:
     {
         PAINTSTRUCT ps{};
-        const HDC hdc = BeginPaint(
-            hwnd,
-            &ps
-        );
+
+        const HDC hdc =
+            BeginPaint(
+                hwnd,
+                &ps
+            );
 
         paint(hdc);
 
@@ -371,7 +483,9 @@ LRESULT MeterWindow::processMessage(
     {
         POINT position{};
         GetCursorPos(&position);
+
         showContextMenu(position);
+
         return 0;
     }
 
@@ -389,8 +503,14 @@ LRESULT MeterWindow::processMessage(
         }
 
         showContextMenu(position);
+
         return 0;
     }
+
+    case WM_DISPLAYCHANGE:
+    case WM_SETTINGCHANGE:
+        reposition();
+        return 0;
 
     case WM_COMMAND:
         if (LOWORD(wParam) == ExitCommand)
@@ -398,6 +518,7 @@ LRESULT MeterWindow::processMessage(
             DestroyWindow(hwnd);
             return 0;
         }
+
         break;
 
     case WM_NCDESTROY:
@@ -406,6 +527,7 @@ LRESULT MeterWindow::processMessage(
             GWLP_USERDATA,
             0
         );
+
         return 0;
 
     case WM_DESTROY:
@@ -424,10 +546,24 @@ LRESULT MeterWindow::processMessage(
 void MeterWindow::paint(HDC hdc)
 {
     RECT rect{};
+
     GetClientRect(
         window_,
         &rect
     );
+
+    HBRUSH background =
+        CreateSolidBrush(
+            TransparentColor
+        );
+
+    FillRect(
+        hdc,
+        &rect,
+        background
+    );
+
+    DeleteObject(background);
 
     SetBkMode(
         hdc,
@@ -437,30 +573,6 @@ void MeterWindow::paint(HDC hdc)
     SelectObject(
         hdc,
         font_
-    );
-
-    RECT shadowRect = rect;
-
-    OffsetRect(
-        &shadowRect,
-        1,
-        1
-    );
-
-    SetTextColor(
-        hdc,
-        RGB(0, 0, 0)
-    );
-
-    DrawTextW(
-        hdc,
-        text_,
-        -1,
-        &shadowRect,
-        DT_CENTER |
-        DT_VCENTER |
-        DT_SINGLELINE |
-        DT_NOPREFIX
     );
 
     SetTextColor(
@@ -473,7 +585,7 @@ void MeterWindow::paint(HDC hdc)
         text_,
         -1,
         &rect,
-        DT_CENTER |
+        DT_LEFT |
         DT_VCENTER |
         DT_SINGLELINE |
         DT_NOPREFIX
@@ -484,7 +596,8 @@ void MeterWindow::showContextMenu(
     POINT position
 )
 {
-    HMENU menu = CreatePopupMenu();
+    HMENU menu =
+        CreatePopupMenu();
 
     if (!menu)
         return;
@@ -496,7 +609,9 @@ void MeterWindow::showContextMenu(
         L"Exit"
     );
 
-    SetForegroundWindow(window_);
+    SetForegroundWindow(
+        window_
+    );
 
     const UINT command =
         TrackPopupMenuEx(

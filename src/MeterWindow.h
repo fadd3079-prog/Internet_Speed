@@ -8,9 +8,16 @@ public:
     MeterWindow();
     ~MeterWindow();
 
-    bool create(HINSTANCE instance, HWND taskbar);
+    bool create(
+        HINSTANCE instance,
+        HWND taskbar
+    );
+
     void show();
-    void update(double downloadMbps, double uploadMbps);
+    void update(
+        double downloadMbps,
+        double uploadMbps
+    );
     void reposition();
 
     HWND handle() const;
@@ -30,13 +37,17 @@ private:
         LPARAM lParam
     );
 
+    bool loadFont();
     void paint(HDC hdc);
     void showContextMenu(POINT position);
 
     HWND window_;
     HWND taskbar_;
     HINSTANCE instance_;
+
     HFONT font_;
+    HANDLE fontResource_;
+
     wchar_t text_[128];
 
     int width_;

@@ -4,7 +4,11 @@
 
 namespace
 {
-    bool getTaskbarRect(HWND taskbar, RECT& rect)
+    constexpr int VerticalOffset = 4;
+    bool getTaskbarInfo(
+        HWND taskbar,
+        RECT &rect,
+        UINT &edge)
     {
         APPBARDATA data{};
         data.cbSize = sizeof(data);
@@ -16,162 +20,151 @@ namespace
             return false;
         }
 
-        if (taskbar != data.hWnd)
+        if (data.hWnd != taskbar)
             return false;
 
         rect = data.rc;
-        return true;
-    }
-
-    bool getTaskbarEdge(
-        HWND taskbar,
-        UINT& edge)
-    {
-        APPBARDATA data{};
-        data.cbSize = sizeof(data);
-
-        if (SHAppBarMessage(
-                ABM_GETTASKBARPOS,
-                &data) == 0)
-        {
-            return false;
-        }
-
-        if (taskbar != data.hWnd)
-            return false;
-
         edge = data.uEdge;
+
         return true;
-    }
-
-    bool getTrayRect(
-        HWND taskbar,
-        RECT& rect)
-    {
-        const HWND tray =
-            FindWindowExW(
-                taskbar,
-                nullptr,
-                L"TrayNotifyWnd",
-                nullptr
-            );
-
-        if (!tray)
-            return false;
-
-        return GetWindowRect(tray, &rect);
     }
 }
 
 namespace Taskbar
 {
-    HWND getWindow()
+    HWND findTaskbar()
     {
         return FindWindowW(
             L"Shell_TrayWnd",
-            nullptr
-        );
+            nullptr);
     }
 
-    bool getBounds(
-        HWND taskbar,
-        RECT& bounds
-    )
+    HWND findTray(HWND taskbar)
     {
         if (!taskbar)
-            return false;
+            return nullptr;
 
-        return getTaskbarRect(
+        return FindWindowExW(
             taskbar,
-            bounds
-        );
+            nullptr,
+            L"TrayNotifyWnd",
+            nullptr);
     }
 
-    POINT getMeterPosition(
+    bool getRect(
+        HWND window,
+        RECT &rect)
+    {
+        if (!window)
+            return false;
+
+        return GetWindowRect(
+            window,
+            &rect);
+    }
+
+    POINT Taskbar::getMeterPosition(
         HWND taskbar,
+        HWND tray,
         int width,
         int height,
-        int margin
-    )
+        int margin)
     {
         RECT taskbarRect{};
-
-        if (!getBounds(
-                taskbar,
-                taskbarRect))
-        {
-            return {0, 0};
-        }
-
         UINT edge = ABE_BOTTOM;
 
-        if (!getTaskbarEdge(
+        if (!getTaskbarInfo(
                 taskbar,
+                taskbarRect,
                 edge))
         {
             return {0, 0};
         }
 
-        RECT trayRect{};
-        const bool hasTray =
-            getTrayRect(
-                taskbar,
-                trayRect
-            );
-
-        POINT position{};
+        POINT screenPosition{};
 
         switch (edge)
         {
-        case ABE_TOP:
         case ABE_BOTTOM:
         {
-            const int x =
-                hasTray
-                    ? trayRect.left - width - margin
-                    : taskbarRect.right - width - margin;
+            constexpr int HorizontalOffset = 16;
+            constexpr int VerticalOffsetLocal = 4;
 
-            const int y =
+            screenPosition.x =
+                taskbarRect.left +
+                HorizontalOffset;
+
+            screenPosition.y =
                 taskbarRect.top +
-                ((taskbarRect.bottom -
-                  taskbarRect.top -
-                  height) / 2);
+                ((
+                     taskbarRect.bottom -
+                     taskbarRect.top -
+                     height) /
+                 2) +
+                VerticalOffsetLocal;
 
-            position = {x, y};
+            break;
+        }
+
+        case ABE_TOP:
+        {
+            constexpr int HorizontalOffset = 16;
+            constexpr int VerticalOffsetLocal = 4;
+
+            screenPosition.x =
+                taskbarRect.left +
+                HorizontalOffset;
+
+            screenPosition.y =
+                taskbarRect.top +
+                ((
+                     taskbarRect.bottom -
+                     taskbarRect.top -
+                     height) /
+                 2) +
+                VerticalOffsetLocal;
+
             break;
         }
 
         case ABE_LEFT:
+        {
+            screenPosition.x =
+                taskbarRect.left +
+                ((
+                     taskbarRect.right -
+                     taskbarRect.left -
+                     width) /
+                 2);
+
+            screenPosition.y =
+                taskbarRect.top +
+                margin;
+
+            break;
+        }
+
         case ABE_RIGHT:
         {
-            const int x =
+            screenPosition.x =
                 taskbarRect.left +
-                ((taskbarRect.right -
-                  taskbarRect.left -
-                  width) / 2);
+                ((
+                     taskbarRect.right -
+                     taskbarRect.left -
+                     width) /
+                 2);
 
-            const int y =
-                hasTray
-                    ? trayRect.top - height - margin
-                    : taskbarRect.bottom - height - margin;
+            screenPosition.y =
+                taskbarRect.top +
+                margin;
 
-            position = {x, y};
             break;
         }
 
         default:
-            position = {
-                taskbarRect.right - width - margin,
-                taskbarRect.bottom - height
-            };
-            break;
+            return {0, 0};
         }
 
-        ScreenToClient(
-            taskbar,
-            &position
-        );
-
-        return position;
+        return screenPosition;
     }
 }

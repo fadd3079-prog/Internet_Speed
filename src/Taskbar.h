@@ -4,15 +4,22 @@
 
 namespace Taskbar
 {
-    HWND getWindow();
+    HWND findTaskbar();
+    HWND findTray(HWND taskbar);
 
-    bool getBounds(
-        HWND taskbar,
-        RECT& bounds
+    inline HWND getWindow()
+    {
+        return findTaskbar();
+    }
+
+    bool getRect(
+        HWND window,
+        RECT& rect
     );
 
     POINT getMeterPosition(
         HWND taskbar,
+        HWND tray,
         int width,
         int height,
         int margin
