@@ -54,6 +54,44 @@ jobs:
 
           Copy-Item $exe.FullName ".\InternetSpeed-win-x64.exe" -Force
 
+      - name: Upload unsigned executable for signing
+        id: upload-unsigned
+        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: .\InternetSpeed-win-x64.exe
+          if-no-files-found: error
+
+      - name: Sign executable with SignPath
+        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        uses: SignPath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: .\signed
+
+      - name: Use signed executable
+        if: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        shell: pwsh
+        run: |
+          $signed = Get-ChildItem -Path .\signed -Filter *.exe -Recurse |
+            Select-Object -First 1
+
+          if (-not $signed) {
+            throw "Signed exe tidak ditemukan."
+          }
+
+          Copy-Item $signed.FullName ".\InternetSpeed-win-x64.exe" -Force
+          Write-Host "Signed executable diterapkan."
+
+      - name: Generate checksum
+        shell: pwsh
+        run: |
           $hash = (Get-FileHash ".\InternetSpeed-win-x64.exe" -Algorithm SHA256).Hash
 
           "$hash *InternetSpeed-win-x64.exe" |
@@ -62,7 +100,7 @@ jobs:
       - name: Publish release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = $env:GITHUB_REF_NAME
 
