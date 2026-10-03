@@ -69,6 +69,7 @@ if(WIN32)
         target_link_options(InternetSpeed PRIVATE
             -Wl,--gc-sections
             -mwindows
+            -municode
         )
     endif()
 

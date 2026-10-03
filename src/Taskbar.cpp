@@ -63,7 +63,7 @@ namespace Taskbar
             &rect);
     }
 
-    POINT Taskbar::getMeterPosition(
+    POINT getMeterPosition(
         HWND taskbar,
         HWND tray,
         int width,
