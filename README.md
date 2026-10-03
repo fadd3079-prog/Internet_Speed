@@ -4,48 +4,68 @@
   <img src="app.svg" alt="Internet Speed icon" width="96">
 </p>
 
-A small Windows app that shows your current download and upload speed directly on the taskbar.
+<p align="center">
+  <a href="https://github.com/fadd3079-prog/Internet_Speed/releases/latest"><img src="https://img.shields.io/github/v/release/fadd3079-prog/Internet_Speed" alt="Latest release"></a>
+  <img src="https://img.shields.io/github/license/fadd3079-prog/Internet_Speed" alt="License">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue" alt="Platform">
+</p>
 
-I made it to keep things simple: just the speed meter, running quietly in the background.
+A small, native internet speed meter. No graphs, no history, no dashboards —
+just your current download and upload speed, running quietly in the background.
 
-## Screenshot
+- **Windows** — shows realtime speed directly on the taskbar (pure Win32, zero dependencies)
+- **Linux** — shows realtime speed as a system tray icon (Qt 6, StatusNotifierItem)
+
+## Screenshot (Windows)
 
 ![Internet Speed](Assets/screenshot.png)
 
-## File Info
+## Download
 
-![InternetSpeed.exe Properties](Assets/image.png)
+Grab the latest release from the
+[Releases page](https://github.com/fadd3079-prog/Internet_Speed/releases/latest):
 
-The current Release build is a portable Windows x64 executable. No installer is required.
+| File | Platform | Notes |
+|---|---|---|
+| `InternetSpeed-win-x64.exe` | Windows x64 | Portable, no installer required |
+| `InternetSpeed-linux-x64` | Linux x64 | Requires Qt 6 |
 
 ## Features
 
-- Realtime download speed
-- Realtime upload speed
-- Lightweight native Windows app
-- Space Mono font embedded in the executable
-- Portable `.exe`
+- Realtime download and upload speed
+- Lightweight native app on both platforms
 - Right-click menu with Exit
-
-## Download
-
-Download the latest `InternetSpeed-win-x64.exe` from the GitHub Releases page and run it directly.
+- Windows: Space Mono font embedded in the executable
 
 ## Build
 
-This project uses CMake, Ninja, and MSVC.
+### Windows
+
+Requires CMake, Ninja and MSVC.
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl.exe
 cmake --build build
 ```
 
-The executable is generated at:
+The executable is generated at `build/bin/InternetSpeed.exe`.
 
-```text
-build/bin/InternetSpeed.exe
+### Linux
+
+Requires CMake, Ninja and Qt 6.
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
-## Notes
+The executable is generated at `build/bin/InternetSpeed`.
 
-The app does not provide graphs, history, ping monitoring, or other extra dashboards. It is intended to stay focused on showing current download and upload speed.
+## Releases
+
+Windows binaries are built automatically by GitHub Actions on every version tag
+(`v*`). Linux binaries are built from the same tag.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

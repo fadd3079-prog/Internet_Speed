@@ -1,73 +1,99 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(InternetSpeed
-    VERSION 1.0.0
+    VERSION 1.1.0
     LANGUAGES CXX
 )
-
-if(MSVC)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-endif()
 
 # C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Windows Unicode
-add_definitions(
-    -DUNICODE
-    -D_UNICODE
-)
+if(WIN32)
+    if(MSVC)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
 
-# Source files
-add_executable(InternetSpeed WIN32
-    src/main.cpp
-    src/Network.cpp
-    src/Network.h
-    src/Taskbar.cpp
-    src/Taskbar.h
-    src/MeterWindow.cpp
-    src/MeterWindow.h
-    resources/app.rc
-)
-
-# Windows system libraries
-target_link_libraries(InternetSpeed PRIVATE
-    user32
-    gdi32
-    shell32
-    iphlpapi
-)
-
-# Compiler-specific optimizations
-if(MSVC)
-    target_compile_options(InternetSpeed PRIVATE
-        /W4
-        /O2
-        /GL
-        /Gy
+    # Windows Unicode
+    add_definitions(
+        -DUNICODE
+        -D_UNICODE
     )
 
-    target_link_options(InternetSpeed PRIVATE
-        /LTCG
-        /OPT:REF
-        /OPT:ICF
-        /SUBSYSTEM:WINDOWS
-        /DYNAMICBASE
-        /NXCOMPAT
+    # Source files
+    add_executable(InternetSpeed WIN32
+        src/main.cpp
+        src/Network.cpp
+        src/Network.h
+        src/Taskbar.cpp
+        src/Taskbar.h
+        src/MeterWindow.cpp
+        src/MeterWindow.h
+        resources/app.rc
     )
 
-elseif(MINGW)
+    # Windows system libraries
+    target_link_libraries(InternetSpeed PRIVATE
+        user32
+        gdi32
+        shell32
+        iphlpapi
+    )
+
+    # Compiler-specific optimizations
+    if(MSVC)
+        target_compile_options(InternetSpeed PRIVATE
+            /W4
+            /O2
+            /GL
+            /Gy
+        )
+
+        target_link_options(InternetSpeed PRIVATE
+            /LTCG
+            /OPT:REF
+            /OPT:ICF
+            /SUBSYSTEM:WINDOWS
+            /DYNAMICBASE
+            /NXCOMPAT
+        )
+
+    elseif(MINGW)
+        target_compile_options(InternetSpeed PRIVATE
+            -O2
+            -ffunction-sections
+            -fdata-sections
+        )
+
+        target_link_options(InternetSpeed PRIVATE
+            -Wl,--gc-sections
+            -mwindows
+        )
+    endif()
+
+elseif(UNIX)
+    # Linux: Qt6 system-tray app. Reads interface byte counters from
+    # /sys/class/net/<iface>/statistics and draws the speed as a tray icon.
+    find_package(Qt6 REQUIRED COMPONENTS Widgets)
+    qt_standard_project_setup()
+
+    add_executable(InternetSpeed
+        src/linux/main.cpp
+        src/linux/LinuxNetwork.cpp
+        src/linux/LinuxNetwork.h
+        src/linux/TrayMeter.cpp
+        src/linux/TrayMeter.h
+    )
+
+    target_link_libraries(InternetSpeed PRIVATE
+        Qt6::Widgets
+    )
+
     target_compile_options(InternetSpeed PRIVATE
         -O2
-        -ffunction-sections
-        -fdata-sections
-    )
-
-    target_link_options(InternetSpeed PRIVATE
-        -Wl,--gc-sections
-        -mwindows
+        -Wall
+        -Wextra
     )
 endif()
 
